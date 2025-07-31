@@ -349,8 +349,21 @@ class VMSI():
 
                     # update current edges
                     # this requires edges to be in the same order as vertices
-                    neg_edges = nedges[neg_verts.astype('bool')]
-                    pos_edges = nedges[pos_verts.astype('bool')]
+
+                    #adding print statements for debugging
+                    #print("nedges.shape =", nedges.shape)
+                    #print("neg_verts.shape =", neg_verts.shape)
+                    #print("neg_verts.astype(bool) =", neg_verts.astype(bool))
+                    #print("neg_verts.astype(bool).shape =", neg_verts.astype(bool).shape)
+
+                    #neg_edges = nedges[neg_verts.astype('bool')]
+                    #pos_edges = nedges[pos_verts.astype('bool')]
+                    #updated
+                    pos_indices = np.where(pos_verts.astype(bool))[0]
+                    neg_indices = np.where(pos_verts.astype(bool) == False)[0]
+
+                    pos_edges = nedges[pos_indices]
+                    neg_edges = nedges[neg_indices]
 
                     self.edges.at[pos_edges[0], 'verts'][self.edges.at[pos_edges[0], 'verts'] == v] = num_v
                     self.edges.at[pos_edges[1], 'verts'][self.edges.at[pos_edges[1], 'verts'] == v] = num_v
@@ -497,9 +510,9 @@ class VMSI():
         self.ext_cells = self.involved_cells[np.isin(self.involved_cells, self.bulk_cells, invert=True)]
         self.involved_cells = np.concatenate((self.bulk_cells, self.ext_cells))
 
-        self.involved_vertices = np.unique(np.concatenate([self.vertices.at[vert, 'nverts'] for vert in self.bulk_vertices]))
+        self.involved_vertices = np.unique(np.concatenate([self.vertices.at[vert, 'nverts'] for vert in self.bulk_vertices])).astype(int)
         self.ext_vertices = self.involved_vertices[np.isin(self.involved_vertices, self.bulk_vertices, invert=True)]
-        self.involved_vertices = np.concatenate((self.bulk_vertices, self.ext_vertices))
+        self.involved_vertices = np.concatenate((self.bulk_vertices, self.ext_vertices)).astype(int)
 
         x0 = np.vstack([np.stack(self.cells['centroids'][self.involved_cells]).T,
                         np.zeros(len(self.involved_cells))]).T
@@ -552,6 +565,10 @@ class VMSI():
                 diff_index += 1
 
         # Check for bad vertices and edges
+        self.involved_vertices = self.involved_vertices.astype(int) #turn float into int
+        print("self.dV.shape:", self.dV.shape)
+        print("len(self.involved_vertices):", len(self.involved_vertices))
+
         bad_verts = np.invert(np.sum(np.abs(self.dV), axis=0) == 0)
         self.dV = self.dV[:,bad_verts]
         self.involved_vertices = self.involved_vertices[bad_verts]
@@ -564,6 +581,10 @@ class VMSI():
 
 
     def estimate_tau(self):
+        print("self.involved_vertices =", self.involved_vertices)
+        print("type:", type(self.involved_vertices))
+        print("len:", len(self.involved_vertices))
+
         """
 
         Estimate tension vector tau, which is tangent to the edge
@@ -573,11 +594,17 @@ class VMSI():
         self.build_diff_operators()
 
         self.involved_edges = -1 * np.ones(self.dC.shape[0], dtype=int)
+        print("dV shape:", self.dV.shape)
+        print("dC shape:", self.dC.shape)
+        print("involved_vertices:", self.involved_vertices.shape)
+        print("vertices['coords'] sample:", self.vertices['coords'][:2])
 
         for i in range(len(self.edges)):
             edge_cells = self.edges.at[i, 'cells']
             idx = np.where((self.dC[:,np.where(edge_cells[0]==self.involved_cells)[0]] != 0) & (self.dC[:,np.where(edge_cells[1]==self.involved_cells)[0]] != 0))[0]
             self.involved_edges[idx] = i
+
+        print(">>> dV shape:", self.dV.shape)
 
         # initialise variables
         tau_1 = np.zeros((self.dV.shape[0], 2))
@@ -585,16 +612,31 @@ class VMSI():
 
         v_coords = np.concatenate([self.vertices['coords'][self.involved_vertices].tolist()])
 
+        print("v_coords shape:", v_coords.shape)
+
         e_chord = np.matmul(self.dV, v_coords)
 
         e_cells = np.zeros((self.dV.shape[0], 2), dtype=int)
         r1 = np.zeros((self.dV.shape[0], 2))
         r2 = np.zeros((self.dV.shape[0], 2))
 
+        print("self.dV.shape =", self.dV.shape)
+        print("Starting edge loop...")
         for e in range(self.dV.shape[0]):
+
+            print(f"\nEdge {e}")
+            print("dV[e,:] =", self.dV[e, :])
 
             e_verts = np.ravel([np.where(self.dV[e,:] == 1), np.where(self.dV[e,:] == -1)])
             e_cells[e,:] = np.ravel([np.where(self.dC[e,:] == 1), np.where(self.dC[e,:] == -1)])
+
+            print(f"\n--- Edge {e} ---")
+            print("e_verts:", e_verts)
+            print("v_coords shape:", v_coords.shape)
+
+            if len(e_verts) < 2:
+                print("❌ e_verts has less than 2 indices — skipping")
+                continue
 
             r1[e,:] = v_coords[e_verts[0],:]
             r2[e,:] = v_coords[e_verts[1],:]
